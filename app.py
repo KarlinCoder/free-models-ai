@@ -1,10 +1,12 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # Importa CORS
 import random
 from g4f.client import Client
 from queue import Queue
 import threading
 
 app = Flask(__name__)
+CORS(app)  # Habilita CORS para toda la aplicación
 
 # Cola para manejar las solicitudes
 request_queue = Queue()
