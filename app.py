@@ -77,7 +77,11 @@ def generate_image():
     except Exception as e:
         # Devolver un mensaje de error claro en caso de fallo
         return jsonify({"error": f"Error al generar imagen: {str(e)}"}), 500
+    
 
+@app.route('/check', methods=['GET'])
+def check():
+    return jsonify({"status": "OK", "message": "API is up and running!"}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8085)
