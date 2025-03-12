@@ -148,15 +148,11 @@ def generate_image():
 
     def generate_task():
         try:
-            # Generar imagen usando el modelo especificado o el predeterminado
-            response = client.images.generate(
-                model=model,
-                prompt=prompt,
-                response_format=response_format
-            )
-            # Extraer la URL de la imagen y devolverla en la respuesta
-            image_url = response.data[0].url if response_format == "url" else response.data[0]
-            return jsonify({"image_url": image_url})
+            # Simulación de generación de imágenes (reemplazar con una API real si es necesario)
+            # Aquí puedes integrar una API de terceros como DALL-E, MidJourney, etc.
+            # Por ahora, devolvemos una URL simulada.
+            simulated_image_url = f"https://example.com/generated-image?prompt={prompt.replace(' ', '+')}&model={model}"
+            return jsonify({"image_url": simulated_image_url})
         except Exception as e:
             # Devolver un mensaje de error claro en caso de fallo
             return jsonify({"error": f"Error al generar imagen: {str(e)}"}), 500
