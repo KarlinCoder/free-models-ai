@@ -1,36 +1,14 @@
-import re
-import g4f
-from g4f.client import Client
-from flask_cors import CORS
 from flask import Flask, request, jsonify
-from queue import Queue
-from threading import Thread
-from functools import wraps
-from time import time, sleep
 import random
+import queue
+import threading
+import time
+from g4f import Model, Provider, generate_async
 
-# Configuración inicial
-client = Client()
 app = Flask(__name__)
-app.config['JSON_AS_ASCII'] = False  # Soporte para caracteres no ASCII
-g4f.logging = True  # Habilitar logging para depuración
 
-# Configuración avanzada de CORS
-CORS(
-    app,
-    resources={r"/*": {"origins": "*"}},  # Permitir todos los orígenes
-    supports_credentials=True,            # Habilitar credenciales si es necesario
-    methods=["GET", "POST", "OPTIONS"],   # Métodos HTTP permitidos
-    allow_headers=["Content-Type", "Authorization"]  # Encabezados permitidos
-)
-
-# Cola para manejar las solicitudes concurrentes
-request_queue = Queue()
-
-# Rate Limiting: Diccionario para rastrear las solicitudes por IP
-request_limits = {}
-
-MODELOS_DISPONIBLES = [
+# Lista de modelos disponibles
+MODELS = [
     "sdxl-turbo",
     "sd-3.5",
     "flux",
@@ -41,136 +19,73 @@ MODELOS_DISPONIBLES = [
     "midjourney"
 ]
 
-# Función auxiliar para limpiar la respuesta
-def clean_response(response):
-    if not response or not isinstance(response, str):
-        return response  # Si la respuesta no es válida, devolverla sin cambios
+# Cola para manejar las solicitudes
+request_queue = queue.Queue()
 
-    # Eliminar todo hasta la etiqueta </think> (incluida)
-    response = re.sub(r".*?</think>", "", response, flags=re.DOTALL)
-
-    # Eliminar saltos de línea adicionales y espacios al inicio/final
-    response = response.strip()
-    return response
-
-
-# Middleware para Rate Limiting
-def rate_limit(limit=5, per=60):  # Máximo 5 solicitudes por minuto
-    def decorator(f):
-        @wraps(f)
-        def wrapped(*args, **kwargs):
-            ip = request.remote_addr
-            current_time = time()
-
-            # Limpiar registros antiguos
-            if ip in request_limits:
-                request_limits[ip] = [t for t in request_limits[ip] if current_time - t < per]
-
-            # Verificar límite
-            if ip not in request_limits or len(request_limits[ip]) < limit:
-                if ip not in request_limits:
-                    request_limits[ip] = []
-                request_limits[ip].append(current_time)
-                return f(*args, **kwargs)
-            else:
-                return jsonify({"error": "Demasiadas solicitudes. Intente de nuevo más tarde."}), 429
-        return wrapped
-    return decorator
-
-
-# Función para procesar solicitudes en la cola
+# Función para procesar las solicitudes en la cola
 def process_queue():
     while True:
-        task = request_queue.get()
-        if task is None:
-            break
-        try:
-            task()  # Ejecutar la tarea
-        except Exception as e:
-            print(f"Error al procesar la solicitud: {str(e)}")
-        finally:
+        if not request_queue.empty():
+            # Obtener la solicitud de la cola
+            task = request_queue.get()
+            prompt = task["prompt"]
+            callback = task["callback"]
+
+            try:
+                # Seleccionar un modelo aleatorio
+                selected_model = random.choice(MODELS)
+                print(f"Modelo seleccionado: {selected_model}")
+
+                # Generar la imagen usando g4f
+                response = generate_async(
+                    model=selected_model,
+                    prompt=prompt
+                )
+
+                # Llamar al callback con la respuesta
+                callback(response)
+            except Exception as e:
+                callback({"error": str(e)})
+            
+            # Marcar la tarea como completada
             request_queue.task_done()
+        else:
+            # Esperar un momento si la cola está vacía
+            time.sleep(1)
 
+# Iniciar el hilo para procesar la cola
+threading.Thread(target=process_queue, daemon=True).start()
 
-# Endpoint para generación de texto
-@app.route('/generate/text', methods=['POST'])
-@rate_limit(limit=5, per=60)  # Aplicar Rate Limiting
-def generate_text():
-    data = request.json
-    prompt = data.get("prompt")
-    model = data.get("model", "gpt-4o-mini")  # Modelo por defecto si no se especifica
-
-    # Validación del campo 'prompt'
-    if not prompt:
-        return jsonify({"error": "El campo 'prompt' es obligatorio"}), 400
-
-    try:
-        # Generar respuesta usando el modelo especificado o el predeterminado
-        response = g4f.ChatCompletion.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            web_search=False
-        )
-        # Limpiar la respuesta antes de enviarla
-        cleaned_response = clean_response(response)
-        return jsonify({"response": cleaned_response})
-    except Exception as e:
-        # Devolver un mensaje de error claro en caso de fallo
-        return jsonify({"error": f"Error al generar texto: {str(e)}"}), 500
-
-
-# Endpoint para generación de imágenes
-MODEL_LIST = [
-    "sdxl-turbo",
-    "sd-3.5",
-    "flux",
-    "flux-pro",
-    "flux-dev",
-    "flux-schnell",
-    "dall-e-3",
-    "midjourney"
-]
-
+# Endpoint para generar imágenes
 @app.route('/generate/image', methods=['POST'])
-@rate_limit(limit=50, per=60)  # Menor límite para imágenes debido a su intensidad
 def generate_image():
     data = request.json
     prompt = data.get("prompt")
-    
-    # Obtener el modelo de la solicitud o seleccionar uno aleatorio si no se especifica
-    model = data.get("model", random.choice(MODEL_LIST))
-    
-    response_format = data.get("response_format", "url")  # Formato de respuesta por defecto
 
-    # Validación del campo 'prompt'
     if not prompt:
         return jsonify({"error": "El campo 'prompt' es obligatorio"}), 400
 
-    def generate_task():
-        try:
-            # Simulación de generación de imágenes (reemplazar con una API real si es necesario)
-            # Aquí puedes integrar una API de terceros como DALL-E, MidJourney, etc.
-            # Por ahora, devolvemos una URL simulada.
-            simulated_image_url = f"https://example.com/generated-image?prompt={prompt.replace(' ', '+')}&model={model}"
-            return jsonify({"image_url": simulated_image_url})
-        except Exception as e:
-            # Devolver un mensaje de error claro en caso de fallo
-            return jsonify({"error": f"Error al generar imagen: {str(e)}"}), 500
+    # Respuesta que se enviará al cliente
+    response_data = {}
+
+    # Callback para manejar la respuesta
+    def callback(response):
+        if "error" in response:
+            response_data["error"] = response["error"]
+        else:
+            response_data["image_url"] = response
 
     # Agregar la tarea a la cola
-    request_queue.put(generate_task)
-    return jsonify({"message": "Solicitud en proceso. Espere unos momentos..."}), 202
+    request_queue.put({"prompt": prompt, "callback": callback})
 
+    # Esperar hasta que la tarea se complete
+    request_queue.join()
 
-@app.route('/check', methods=['GET'])
-def check():
-    return jsonify({"status": "OK", "message": "API is up and running!"}), 200
-
+    # Devolver la respuesta al cliente
+    if "error" in response_data:
+        return jsonify(response_data), 500
+    else:
+        return jsonify(response_data), 200
 
 if __name__ == '__main__':
-    # Iniciar el hilo para procesar la cola
-    worker_thread = Thread(target=process_queue, daemon=True)
-    worker_thread.start()
-
-    # Iniciar la aplicación Flask
-    app.run(debug=True, host='0.0.0.0', port=8085)
+    app.run(host='0.0.0.0', port=5000)
