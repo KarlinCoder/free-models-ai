@@ -11,10 +11,7 @@ La API está diseñada para ser flexible, fácil de usar y compatible con múlti
 ## **Base URL**
 
 La base de la API es:  
-`http://<host>:8085`
-
-Por ejemplo, si la API está alojada localmente, la URL base sería:  
-`http://localhost:8085`
+`https://free-models-ai.onrender.com)`
 
 ---
 
@@ -241,7 +238,3 @@ Los siguientes modelos están disponibles para el endpoint `/generate/image`:
    - Si no se especifica un modelo, se usará el predeterminado:
      - Para texto: `gpt-4o-mini`
      - Para imágenes: `flux`
-
----
-
-Con esta documentación, los usuarios pueden entender fácilmente cómo interactuar con la API y aprovechar todas sus funcionalidades. 😊
