@@ -8,13 +8,19 @@ from flask import Flask, request, jsonify
 client = Client()
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False  # Soporte para caracteres no ASCII
-CORS(app, resources={r"/*": {"origins": "*"}})  # Habilitar CORS para todas las rutas
 g4f.logging = True  # Habilitar logging para depuración
 
+# Configuración avanzada de CORS
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},  # Permitir todos los orígenes
+    supports_credentials=True,            # Habilitar credenciales si es necesario
+    methods=["GET", "POST", "OPTIONS"],   # Métodos HTTP permitidos
+    allow_headers=["Content-Type", "Authorization"]  # Encabezados permitidos
+)
 
 # Función auxiliar para limpiar la respuesta
 def clean_response(response):
-    # Expresión regular para encontrar y eliminar <think>...</think>
     if not response or not isinstance(response, str):
         return response  # Si la respuesta no es válida, devolverla sin cambios
 
@@ -77,11 +83,12 @@ def generate_image():
     except Exception as e:
         # Devolver un mensaje de error claro en caso de fallo
         return jsonify({"error": f"Error al generar imagen: {str(e)}"}), 500
-    
+
 
 @app.route('/check', methods=['GET'])
 def check():
     return jsonify({"status": "OK", "message": "API is up and running!"}), 200
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8085)
