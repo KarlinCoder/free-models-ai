@@ -7,6 +7,7 @@ from queue import Queue
 from threading import Thread
 from functools import wraps
 from time import time, sleep
+import random
 
 # Configuración inicial
 client = Client()
@@ -29,7 +30,6 @@ request_queue = Queue()
 # Rate Limiting: Diccionario para rastrear las solicitudes por IP
 request_limits = {}
 
-# Lista de modelos disponibles para intentar en caso de error grave
 MODELOS_DISPONIBLES = [
     "sdxl-turbo",
     "sd-3.5",
@@ -78,53 +78,91 @@ def rate_limit(limit=5, per=60):  # Máximo 5 solicitudes por minuto
     return decorator
 
 
+# Función para procesar solicitudes en la cola
+def process_queue():
+    while True:
+        task = request_queue.get()
+        if task is None:
+            break
+        try:
+            task()  # Ejecutar la tarea
+        except Exception as e:
+            print(f"Error al procesar la solicitud: {str(e)}")
+        finally:
+            request_queue.task_done()
+
+
+# Endpoint para generación de texto
+@app.route('/generate/text', methods=['POST'])
+@rate_limit(limit=5, per=60)  # Aplicar Rate Limiting
+def generate_text():
+    data = request.json
+    prompt = data.get("prompt")
+    model = data.get("model", "gpt-4o-mini")  # Modelo por defecto si no se especifica
+
+    # Validación del campo 'prompt'
+    if not prompt:
+        return jsonify({"error": "El campo 'prompt' es obligatorio"}), 400
+
+    try:
+        # Generar respuesta usando el modelo especificado o el predeterminado
+        response = g4f.ChatCompletion.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            web_search=False
+        )
+        # Limpiar la respuesta antes de enviarla
+        cleaned_response = clean_response(response)
+        return jsonify({"response": cleaned_response})
+    except Exception as e:
+        # Devolver un mensaje de error claro en caso de fallo
+        return jsonify({"error": f"Error al generar texto: {str(e)}"}), 500
+
+
 # Endpoint para generación de imágenes
+MODEL_LIST = [
+    "sdxl-turbo",
+    "sd-3.5",
+    "flux",
+    "flux-pro",
+    "flux-dev",
+    "flux-schnell",
+    "dall-e-3",
+    "midjourney"
+]
+
 @app.route('/generate/image', methods=['POST'])
-@rate_limit(limit=3, per=60)  # Menor límite para imágenes debido a su intensidad
+@rate_limit(limit=50, per=60)  # Menor límite para imágenes debido a su intensidad
 def generate_image():
     data = request.json
     prompt = data.get("prompt")
-    model = data.get("model", "flux")  # Modelo por defecto si no se especifica
+    
+    # Obtener el modelo de la solicitud o seleccionar uno aleatorio si no se especifica
+    model = data.get("model", random.choice(MODEL_LIST))
+    
     response_format = data.get("response_format", "url")  # Formato de respuesta por defecto
 
     # Validación del campo 'prompt'
     if not prompt:
         return jsonify({"error": "El campo 'prompt' es obligatorio"}), 400
 
-    def generate_image_with_retry(prompt, model, response_format):
-        start_time = time()
-        modelos_intentados = set()  # Para evitar repetir modelos
-        while time() - start_time < 60:  # Tiempo máximo de espera: 1 minuto
-            try:
-                # Generar imagen usando el modelo especificado o el predeterminado
-                response = client.images.generate(
-                    model=model,
-                    prompt=prompt,
-                    response_format=response_format
-                )
-                # Extraer la URL de la imagen y devolverla en la respuesta
-                image_url = response.data[0].url if response_format == "url" else response.data[0]
-                return jsonify({"image_url": image_url})
-            except Exception as e:
-                print(f"Error al generar imagen con el modelo {model}: {str(e)}")
-                modelos_intentados.add(model)
-
-                # Determinar si el error es leve o grave
-                if "timeout" in str(e).lower() or "retry" in str(e).lower():
-                    # Error leve: reintento con el mismo modelo
-                    continue
-                else:
-                    # Error grave: cambiar de modelo
-                    modelos_restantes = [m for m in MODELOS_DISPONIBLES if m not in modelos_intentados]
-                    if not modelos_restantes:
-                        return jsonify({"error": "No se pudo generar la imagen con ningún modelo disponible."}), 500
-                    model = modelos_restantes[0]  # Cambiar al siguiente modelo
-
-        # Si se supera el tiempo máximo de espera
-        return jsonify({"error": "Se superó el tiempo máximo de espera para generar la imagen."}), 500
+    def generate_task():
+        try:
+            # Generar imagen usando el modelo especificado o el predeterminado
+            response = client.images.generate(
+                model=model,
+                prompt=prompt,
+                response_format=response_format
+            )
+            # Extraer la URL de la imagen y devolverla en la respuesta
+            image_url = response.data[0].url if response_format == "url" else response.data[0]
+            return jsonify({"image_url": image_url})
+        except Exception as e:
+            # Devolver un mensaje de error claro en caso de fallo
+            return jsonify({"error": f"Error al generar imagen: {str(e)}"}), 500
 
     # Agregar la tarea a la cola
-    request_queue.put(lambda: generate_image_with_retry(prompt, model, response_format))
+    request_queue.put(generate_task)
     return jsonify({"message": "Solicitud en proceso. Espere unos momentos..."}), 202
 
 
@@ -135,7 +173,7 @@ def check():
 
 if __name__ == '__main__':
     # Iniciar el hilo para procesar la cola
-    worker_thread = Thread(target=lambda: process_queue(), daemon=True) # type: ignore
+    worker_thread = Thread(target=process_queue, daemon=True)
     worker_thread.start()
 
     # Iniciar la aplicación Flask
