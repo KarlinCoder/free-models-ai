@@ -1,11 +1,13 @@
 from flask import Flask, request, jsonify
 import random
-import queue
+from g4f.client import Client
+from queue import Queue
 import threading
-import time
-from g4f import Model, Provider, generate_async
 
 app = Flask(__name__)
+
+# Cola para manejar las solicitudes
+request_queue = Queue()
 
 # Lista de modelos disponibles
 MODELS = [
@@ -19,73 +21,59 @@ MODELS = [
     "midjourney"
 ]
 
-# Cola para manejar las solicitudes
-request_queue = queue.Queue()
-
 # Función para procesar las solicitudes en la cola
 def process_queue():
     while True:
-        if not request_queue.empty():
-            # Obtener la solicitud de la cola
-            task = request_queue.get()
-            prompt = task["prompt"]
-            callback = task["callback"]
-
-            try:
-                # Seleccionar un modelo aleatorio
-                selected_model = random.choice(MODELS)
-                print(f"Modelo seleccionado: {selected_model}")
-
-                # Generar la imagen usando g4f
-                response = generate_async(
-                    model=selected_model,
-                    prompt=prompt
-                )
-
-                # Llamar al callback con la respuesta
-                callback(response)
-            except Exception as e:
-                callback({"error": str(e)})
-            
-            # Marcar la tarea como completada
+        # Obtener la solicitud de la cola
+        request_data = request_queue.get()
+        callback = request_data["callback"]
+        try:
+            # Seleccionar un modelo aleatorio
+            model = random.choice(MODELS)
+            client = Client()
+            response = client.images.generate(
+                model=model,
+                prompt=request_data["prompt"],
+                response_format="url"
+            )
+            # Llamar al callback con la respuesta
+            callback({"image_url": response.data[0].url})
+        except Exception as e:
+            callback({"error": str(e)})
+        finally:
             request_queue.task_done()
-        else:
-            # Esperar un momento si la cola está vacía
-            time.sleep(1)
 
 # Iniciar el hilo para procesar la cola
 threading.Thread(target=process_queue, daemon=True).start()
 
 # Endpoint para generar imágenes
-@app.route('/generate/image', methods=['POST'])
+@app.route("/generate/image", methods=["POST"])
 def generate_image():
-    data = request.json
-    prompt = data.get("prompt")
+    # Validar que el JSON contenga el campo 'prompt'
+    data = request.get_json()
+    if not data or "prompt" not in data or not data["prompt"].strip():
+        return jsonify({"error": "El campo 'prompt' es obligatorio y no puede estar vacío."}), 400
 
-    if not prompt:
-        return jsonify({"error": "El campo 'prompt' es obligatorio"}), 400
-
-    # Respuesta que se enviará al cliente
+    # Variable para almacenar la respuesta
     response_data = {}
 
     # Callback para manejar la respuesta
-    def callback(response):
-        if "error" in response:
-            response_data["error"] = response["error"]
-        else:
-            response_data["image_url"] = response
+    def callback(data):
+        nonlocal response_data
+        response_data.update(data)
 
-    # Agregar la tarea a la cola
-    request_queue.put({"prompt": prompt, "callback": callback})
+    # Agregar la solicitud a la cola
+    request_queue.put({"prompt": data["prompt"], "callback": callback})
 
-    # Esperar hasta que la tarea se complete
+    # Esperar a que se procese la solicitud
     request_queue.join()
 
-    # Devolver la respuesta al cliente
+    # Verificar si hubo un error
     if "error" in response_data:
-        return jsonify(response_data), 500
-    else:
-        return jsonify(response_data), 200
+        return jsonify({"error": response_data["error"]}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Retornar la URL de la imagen generada
+    return jsonify({"image_url": response_data["image_url"]})
+
+if __name__ == "__main__":
+    app.run(debug=True)
