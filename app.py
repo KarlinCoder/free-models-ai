@@ -4,7 +4,8 @@ import random
 from g4f.client import Client
 
 app = Flask(__name__)
-CORS(app)  # Habilita CORS para toda la aplicación
+
+CORS(app, resources={r"/*": {"origins": "*"}})  # Permite todas las rutas y orígenes
 
 # Lista de modelos disponibles
 MODELS = [
