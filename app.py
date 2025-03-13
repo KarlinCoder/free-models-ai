@@ -18,6 +18,30 @@ MODELS = [
     "midjourney"
 ]
 
+# Función para traducir y ajustar el prompt
+def translate_and_refine_prompt(prompt):
+    try:
+        # Crear un cliente para interactuar con la IA
+        client = Client()
+        
+        # Primero, traducimos el texto al inglés
+        translation_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres un traductor de textos a Inglés, te dan un texto y devuelves el texto pero en ingles, diectamente, en texto plano"},
+                {"role": "user", "content": f"{prompt}'"}
+            ],
+            web_search=False
+        )
+        
+        # Extraemos el contenido traducido y refinado
+        translated_prompt = translation_response.choices[0].message.content.strip()
+        return translated_prompt
+    except Exception as e:
+        # Si ocurre un error, retornamos el prompt original
+        print(f"Error al traducir o refinar el prompt: {str(e)}")
+        return prompt
+
 # Endpoint para generar imágenes
 @app.route("/generate/image", methods=["POST"])
 def generate_image():
@@ -32,6 +56,10 @@ def generate_image():
         return jsonify({"error": "El número de imágenes debe ser 1 o 2."}), 400
 
     try:
+        # Traducir y ajustar el prompt
+        original_prompt = data["prompt"]
+        refined_prompt = translate_and_refine_prompt(original_prompt)
+
         # Array para almacenar las URLs de las imágenes generadas
         image_urls = []
 
@@ -41,14 +69,18 @@ def generate_image():
             client = Client()
             response = client.images.generate(
                 model=model,
-                prompt=data["prompt"],
+                prompt=refined_prompt,  # Usamos el prompt refinado
                 response_format="url"
             )
             # Agregar la URL de la imagen al array
             image_urls.append(response.data[0].url)
 
         # Retornar el array con las URLs de las imágenes generadas
-        return jsonify({"image_urls": image_urls})
+        return jsonify({
+            "original_prompt": original_prompt,
+            "refined_prompt": refined_prompt,
+            "image_urls": image_urls
+        })
     except Exception as e:
         # Manejar errores y retornar un mensaje de error
         return jsonify({"error": str(e)}), 500
