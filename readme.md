@@ -238,3 +238,4 @@ Los siguientes modelos están disponibles para el endpoint `/generate/image`:
    - Si no se especifica un modelo, se usará el predeterminado:
      - Para texto: `gpt-4o-mini`
      - Para imágenes: `flux`
+# nany-ai-backend
